@@ -7,12 +7,48 @@
 
 namespace qcor {
 
+void OpenQasmV3MLIRGenerator::initialize_mlirgen(
+    const std::string func_name, std::vector<mlir::Type> arg_types,
+    std::vector<std::string> arg_var_names,
+    std::vector<std::string> var_attributes, mlir::Type return_type) {
+  mlir::FunctionType func_type2;
+  if (return_type) {
+    func_type2 =
+        builder.getFunctionType(llvm::makeArrayRef(arg_types), return_type);
+  } else {
+    func_type2 =
+        builder.getFunctionType(llvm::makeArrayRef(arg_types), llvm::None);
+  }
+  auto proto2 = mlir::FuncOp::create(
+      builder.getUnknownLoc(), "__internal_mlir_" + func_name, func_type2);
+  mlir::FuncOp function2(proto2);
+  std::string file_name = "internal_mlirgen_qcor_";
+  auto save_main_entry_block = function2.addEntryBlock();
+  builder.setInsertionPointToStart(save_main_entry_block);
+  m_module.push_back(function2);
+  main_entry_block = save_main_entry_block;
+
+  // Configure block arguments
+  visitor = std::make_shared<qasm3_visitor>(builder, m_module, file_name);
+  auto symbol_table = visitor->getScopedSymbolTable();
+  auto arguments = main_entry_block->getArguments();
+  for (int i = 0; i < arg_var_names.size(); i++) {
+    symbol_table->add_symbol(arg_var_names[i], arguments[i],
+                             std::vector<std::string>{var_attributes[i]});
+  }
+
+  add_main = false;
+  if (!return_type) {
+    add_custom_return = true;
+  }
+
+  return;
+}
+
 void OpenQasmV3MLIRGenerator::initialize_mlirgen(bool _add_entry_point,
                                                  const std::string function) {
   file_name = function;
   add_entry_point = _add_entry_point;
-
-  m_module = mlir::ModuleOp::create(builder.getUnknownLoc());
 
   // Useful opaque type defs
   llvm::StringRef qubit_type_name("Qubit"), array_type_name("Array"),
@@ -97,7 +133,9 @@ void OpenQasmV3MLIRGenerator::mlirgen(const std::string &src) {
   using namespace antlr4;
   using namespace qasm3;
 
-  visitor = std::make_shared<qasm3_visitor>(builder, m_module, file_name);
+  if (!visitor) {
+    visitor = std::make_shared<qasm3_visitor>(builder, m_module, file_name);
+  }
 
   ANTLRInputStream input(src);
   qasm3Lexer lexer(&input);
@@ -139,23 +177,24 @@ void OpenQasmV3MLIRGenerator::mlirgen(const std::string &src) {
 
 void OpenQasmV3MLIRGenerator::finalize_mlirgen() {
   auto scoped_symbol_table = visitor->getScopedSymbolTable();
-  if (auto b = scoped_symbol_table.get_last_created_block()) {
+  if (auto b = scoped_symbol_table->get_last_created_block()) {
     builder.setInsertionPointToEnd(b);
   }
   auto all_qalloc_ops =
-      scoped_symbol_table.get_global_symbols_of_type<mlir::quantum::QallocOp>();
+      scoped_symbol_table
+          ->get_global_symbols_of_type<mlir::quantum::QallocOp>();
   for (auto op : all_qalloc_ops) {
     builder.create<mlir::quantum::DeallocOp>(builder.getUnknownLoc(), op);
   }
 
   // Add any function names that we created.
-  auto fnames = scoped_symbol_table.get_seen_function_names();
+  auto fnames = scoped_symbol_table->get_seen_function_names();
   for (auto f : fnames) {
     function_names.push_back(f);
   }
 
   if (add_main) {
-    if (auto b = scoped_symbol_table.get_last_created_block()) {
+    if (auto b = scoped_symbol_table->get_last_created_block()) {
       builder.setInsertionPointToEnd(b);
     } else {
       builder.setInsertionPointToEnd(main_entry_block);
@@ -166,6 +205,11 @@ void OpenQasmV3MLIRGenerator::finalize_mlirgen() {
         builder.create<mlir::ConstantOp>(builder.getUnknownLoc(), integer_attr);
     builder.create<mlir::ReturnOp>(builder.getUnknownLoc(),
                                    llvm::ArrayRef<mlir::Value>(ret));
+  }
+
+  if (add_custom_return) {
+    builder.create<mlir::ReturnOp>(builder.getUnknownLoc(),
+                                   llvm::ArrayRef<mlir::Value>());
   }
 }
 

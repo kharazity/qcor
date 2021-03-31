@@ -4,6 +4,7 @@
 #include "xacc.hpp"
 #include "xacc_quantum_gate_api.hpp"
 #include "xacc_service.hpp"
+#include "observable_provider.hpp"
 
 namespace qcor {
 
@@ -89,13 +90,24 @@ std::shared_ptr<Observable> createObservable(const std::string &name,
                                              HeterogeneousMap &&options) {
   if (!xacc::isInitialized())
     xacc::internal_compiler::compiler_InitializeXACC();
-  return xacc::quantum::getObservable(name, options);
+    //if name == pauli or fermi do this 
+    if(name == "pauli" || name == "fermion"){
+      return xacc::quantum::getObservable(name, options);
+    }
+    else{
+      return xacc::getService<ObservableProvider>(name)->createOperator(options);
+    }
 }
 std::shared_ptr<Observable> createObservable(const std::string &name,
                                              HeterogeneousMap &options) {
   if (!xacc::isInitialized())
     xacc::internal_compiler::compiler_InitializeXACC();
-  return xacc::quantum::getObservable(name, options);
+  if(name == "pauli" || name == "fermion"){
+    return xacc::quantum::getObservable(name, options);
+  }
+  else{
+    return xacc::getService<qcor::ObservableProvider>(name)->createOperator(options);
+  }
 }
 
 std::shared_ptr<Observable> createOperator(const std::string &repr) {

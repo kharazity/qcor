@@ -1,0 +1,7 @@
+{
+    "bundle.symbolic_name" : "qcor_obs_providers",
+    "bundle.activator" : true,
+    "bundle.name" : "Qcor observable providers",
+    "bundle.description" : ""
+  }
+  

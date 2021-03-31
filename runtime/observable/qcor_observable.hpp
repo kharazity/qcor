@@ -4,7 +4,7 @@
 #include "Observable.hpp"
 #include "PauliOperator.hpp"
 #include "qcor_utils.hpp"
-
+#include "observable_provider.hpp"
 namespace qcor {
 
 // Remap xacc types to qcor ones

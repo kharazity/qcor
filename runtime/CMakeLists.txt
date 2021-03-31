@@ -5,7 +5,7 @@ install(FILES "${CMAKE_BINARY_DIR}/runtime/qcor_version" DESTINATION include/qco
 
 set(LIBRARY_NAME qcor)
 
-file(GLOB SRC observable/qcor_observable.cpp 
+file(GLOB SRC observable/qcor_observable.cpp
               optimizer/qcor_optimizer.cpp 
               objectives/objective_function.cpp
               execution/taskInitiate.cpp
@@ -36,6 +36,7 @@ endif()
 
 file(GLOB HEADERS qcor.hpp 
                   observable/qcor_observable.hpp 
+                  observable/observable_provider.hpp
                   optimizer/qcor_optimizer.hpp 
                   kernel/quantum_kernel.hpp 
                   objectives/objective_function.hpp 
@@ -53,3 +54,4 @@ endif()
 add_subdirectory(objectives)
 add_subdirectory(qrt)
 add_subdirectory(jit)
+add_subdirectory(observable)

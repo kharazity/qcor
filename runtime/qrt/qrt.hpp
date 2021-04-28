@@ -21,7 +21,10 @@ class QuantumRuntime : public xacc::Identifiable {
 
 public:
   virtual void initialize(const std::string kernel_name) = 0;
-
+  virtual void __begin_mark_segment_as_compute() = 0;
+  virtual void __end_mark_segment_as_compute() = 0;
+  virtual bool isComputeSection() = 0;
+  
   virtual void h(const qubit &qidx) = 0;
   virtual void x(const qubit &qidx) = 0;
   virtual void y(const qubit &qidx) = 0;
@@ -119,6 +122,19 @@ void t(const qubit &qidx);
 void tdg(const qubit &qidx);
 void s(const qubit &qidx);
 void sdg(const qubit &qidx);
+// Reset a qubit (to zero state)
+void reset(const qubit &qidx);
+
+// broadcast across qreg
+void h(qreg q);
+void x(qreg q);
+void y(qreg q);
+void z(qreg q);
+void t(qreg q);
+void tdg(qreg q);
+void s(qreg q);
+void sdg(qreg q);
+void reset(qreg qidx);
 
 // Common single-qubit, parameterized instructions
 void rx(const qubit &qidx, const double theta);
@@ -129,11 +145,18 @@ void u1(const qubit &qidx, const double theta);
 void u3(const qubit &qidx, const double theta, const double phi,
         const double lambda);
 
-// Reset a qubit (to zero state)
-void reset(const qubit &qidx);
+// broadcast rotations across qubits
+void rx(qreg qidx, const double theta);
+void ry(qreg qidx, const double theta);
+void rz(qreg qidx, const double theta);
+// U1(theta) gate
+void u1(qreg qidx, const double theta);
+void u3(qreg qidx, const double theta, const double phi,
+        const double lambda);
 
-// Measure-Z
+// Measure-Z and broadcast mz
 bool mz(const qubit &qidx);
+void mz(qreg q);
 
 // Common two-qubit gates.
 void cnot(const qubit &src_idx, const qubit &tgt_idx);
@@ -145,6 +168,12 @@ void swap(const qubit &src_idx, const qubit &tgt_idx);
 // Common parameterized 2 qubit gates.
 void cphase(const qubit &src_idx, const qubit &tgt_idx, const double theta);
 void crz(const qubit &src_idx, const qubit &tgt_idx, const double theta);
+
+// Broadcast two registers
+void cnot(qreg src, qreg tgt);
+void cy(qreg src, qreg tgt);
+void cz(qreg src, qreg tgt);
+void ch(qreg src, qreg tgt);
 
 // exponential of i * theta * H, where H is an Observable pointer
 void exp(qreg q, const double theta, xacc::Observable &H);
@@ -197,6 +226,8 @@ extern std::vector<int> __qubit_map;
 extern std::vector<int> parse_qubit_map(const char *qubit_map_str);
 extern void apply_decorators(const std::string &decorator_cmdline_string);
 extern std::string __qrt_env;
+// Print final CompositeInstruction for backend submission
+extern bool __print_final_submission;
 // Execute the pass manager on the provided kernel.
 // If none provided, execute the pass manager on the current QRT kernel.
 void execute_pass_manager(

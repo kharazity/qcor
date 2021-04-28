@@ -21,6 +21,7 @@ std::string __user_opt_passes = "";
 std::string __placement_name = "";
 std::vector<int> __qubit_map = {};
 std::string __qrt_env = "nisq";
+bool __print_final_submission = false;
 
 void execute_pass_manager(
     std::shared_ptr<CompositeInstruction> optional_composite) {
@@ -221,6 +222,119 @@ void persistBitstring(xacc::AcceleratorBuffer *buffer) {
   const auto bitstring = buffer->single_measurements_to_bitstring();
   if (!bitstring.empty()) {
     buffer->appendMeasurement(bitstring);
+  }
+}
+
+void h(qreg q) {
+  for (int i = 0; i < q.size(); i++) {
+    h(q[i]);
+  }
+}
+
+void x(qreg q) {
+  for (int i = 0; i < q.size(); i++) {
+    x(q[i]);
+  }
+}
+void y(qreg q) {
+  for (int i = 0; i < q.size(); i++) {
+    y(q[i]);
+  }
+}
+void z(qreg q) {
+  for (int i = 0; i < q.size(); i++) {
+    z(q[i]);
+  }
+}
+void t(qreg q) {
+  for (int i = 0; i < q.size(); i++) {
+    t(q[i]);
+  }
+}
+void tdg(qreg q) {
+  for (int i = 0; i < q.size(); i++) {
+    tdg(q[i]);
+  }
+}
+void s(qreg q) {
+  for (int i = 0; i < q.size(); i++) {
+    s(q[i]);
+  }
+}
+void sdg(qreg q) {
+  for (int i = 0; i < q.size(); i++) {
+    sdg(q[i]);
+  }
+}
+void mz(qreg q) {
+  for (int i = 0; i < q.size(); i++) {
+    mz(q[i]);
+  }
+}
+
+void rx(qreg q, const double theta) {
+  for (int i = 0; i < q.size(); i++) {
+    rx(q[i], theta);
+  }
+}
+void ry(qreg q, const double theta) {
+  for (int i = 0; i < q.size(); i++) {
+    ry(q[i], theta);
+  }
+}
+void rz(qreg q, const double theta) {
+  for (int i = 0; i < q.size(); i++) {
+    rz(q[i], theta);
+  }
+}
+// U1(theta) gate
+void u1(qreg q, const double theta) {
+  for (int i = 0; i < q.size(); i++) {
+    u1(q[i], theta);
+  }
+}
+void u3(qreg q, const double theta, const double phi, const double lambda) {
+  for (int i = 0; i < q.size(); i++) {
+    u3(q[i], theta, phi, lambda);
+  }
+}
+void reset(qreg q) {
+  for (int i = 0; i < q.size(); i++) {
+    reset(q[i]);
+  }
+}
+
+void cnot(qreg src, qreg tgt) {
+  assert(src.size() == tgt.size() &&
+         "2-qubit broadcast must be across registers of same size.");
+
+  for (int i = 0; i < src.size(); i++) {
+    cnot(src[i], tgt[i]);
+  }
+}
+
+void cy(qreg src, qreg tgt) {
+  assert(src.size() == tgt.size() &&
+         "2-qubit broadcast must be across registers of same size.");
+
+  for (int i = 0; i < src.size(); i++) {
+    cy(src[i], tgt[i]);
+  }
+}
+void cz(qreg src, qreg tgt) {
+  assert(src.size() == tgt.size() &&
+         "2-qubit broadcast must be across registers of same size.");
+
+  for (int i = 0; i < src.size(); i++) {
+    cz(src[i], tgt[i]);
+  }
+}
+void ch(qreg src, qreg tgt) {
+  assert(src.size() == tgt.size() &&
+         "2-qubit broadcast must be across registers of same size.");
+
+  for (int i = 0; i < src.size(); i++) {
+    ch(src[i], tgt[i]);
   }
 }
 }  // namespace quantum

@@ -1,16 +1,16 @@
-
+add_subdirectory(helper)
 set(LIBRARY_NAME token_collector_util)
 add_library(${LIBRARY_NAME}
             SHARED
             token_collector_util.cpp)
 
 target_include_directories(${LIBRARY_NAME}
-                           PUBLIC . ${CMAKE_BINARY_DIR}
+                           PUBLIC . .. ${CMAKE_BINARY_DIR}
                                   ${CLANG_INCLUDE_DIRS}
                                   ${LLVM_INCLUDE_DIRS})
 
 target_link_libraries(${LIBRARY_NAME}
-                      PRIVATE ${CLANG_LIBS} ${LLVM_LIBS} xacc::xacc xacc::quantum_gate qrt)
+                      PRIVATE ${CLANG_LIBS} ${LLVM_LIBS} xacc::xacc xacc::quantum_gate qrt token_collector_helper)
 
 if(APPLE)
   set_target_properties(${LIBRARY_NAME}

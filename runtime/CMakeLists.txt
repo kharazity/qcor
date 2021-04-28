@@ -16,6 +16,7 @@ add_library(${LIBRARY_NAME} SHARED ${SRC})
 target_include_directories(${LIBRARY_NAME} PUBLIC . qrt 
                             observable 
                             optimizer 
+                            jit
                             kernel 
                             objectives 
                             execution 
@@ -41,7 +42,6 @@ file(GLOB HEADERS qcor.hpp
                   kernel/quantum_kernel.hpp 
                   objectives/objective_function.hpp 
                   execution/taskInitiate.hpp
-                  #utils/eigen_qcor_unitary_addon.hpp
                   utils/qcor_utils.hpp)
                   
 install(FILES ${HEADERS} DESTINATION include/qcor)

@@ -179,5 +179,58 @@ class TestKernelJIT(unittest.TestCase):
         self.assertEqual(comp2.getInstruction(1).name(), "Z") 
         self.assertEqual(comp3.getInstruction(1).name(), "T") 
 
+    def test_instBroadCast(self):
+        set_qpu('qpp', {'shots':1024})
+        
+        @qjit
+        def broadCastTest(q : qreg):
+            # Simple broadcast
+            X(q)
+            # broadcast by slice
+            Z(q[0:q.size()])
+            # Even qubits
+            Y(q[0:q.size():2])
+
+        q = qalloc(6)
+        comp = broadCastTest.extract_composite(q)
+        counter = 0
+        for i in range(q.size()):
+            self.assertEqual(comp.getInstruction(counter).name(), "X") 
+            self.assertEqual(comp.getInstruction(counter).bits()[0], i) 
+            counter += 1
+        
+        for i in range(q.size()):
+            self.assertEqual(comp.getInstruction(counter).name(), "Z") 
+            self.assertEqual(comp.getInstruction(counter).bits()[0], i) 
+            counter += 1
+        
+        for i in range(0, q.size(), 2):
+            self.assertEqual(comp.getInstruction(counter).name(), "Y") 
+            self.assertEqual(comp.getInstruction(counter).bits()[0], i) 
+            counter += 1    
+        
+        self.assertEqual(comp.nInstructions(), counter)
+    
+    def test_multi_qregs(self):
+        set_qpu('qpp', {'shots':1024})
+        
+        @qjit 
+        def bell_qubits(q: qubit, r: qubit):
+            H(q)
+            X.ctrl(q, r)
+            Measure(q)
+            Measure(r)
+        
+        q = qalloc(1)
+        r = qalloc(1)
+        bell_qubits(q[0], r[0])
+        q.print()
+        r.print()
+        self.assertEqual(len(q.counts()), 2)
+        self.assertEqual(len(r.counts()), 2)
+        # entangled
+        self.assertEqual(q.counts()["0"], r.counts()["0"])
+        self.assertEqual(q.counts()["1"], r.counts()["1"])
+
 if __name__ == '__main__':
   unittest.main()

@@ -48,10 +48,23 @@ void QCORSyntaxHandler::GetReplacement(Preprocessor &PP, Declarator &D,
     } else if (type == "qcor::qreg") {
       bufferNames.push_back(ident->getName().str());
       type = "qreg";
+    } else if (type.find("xacc::internal_compiler::qubit") !=
+               std::string::npos) {
+      bufferNames.push_back(ident->getName().str());
+      type = "qubit";
     }
 
     program_arg_types.push_back(type);
     program_parameters.push_back(var);
+
+    // If this was a passed kernel as a KernelSignature, then 
+    // we need to add to the kernels in translation unit
+    if (auto t = dyn_cast<TypedefType>(parm_var_decl->getType())) {
+      auto d = t->desugar();
+      if (d.getAsString().find("KernelSignature") != std::string::npos) {
+        qcor::append_kernel(var, {}, {});
+      }
+    }
   }
 
   GetReplacement(PP, kernel_name, program_arg_types, program_parameters,
@@ -85,15 +98,20 @@ void QCORSyntaxHandler::GetReplacement(
   // with XACC api calls
   qcor::append_kernel(kernel_name, program_arg_types, program_parameters);
 
-  for (int i = 0; i < program_arg_types.size(); i++) {
-    if (program_arg_types[i].find("CallableKernel") != std::string::npos) {
-      // we have a kernel we can call, need to add it to 
-      // append_kernel call. 
-      qcor::append_kernel(program_parameters[i], {}, {});
-    }
-  }
+  // for (int i = 0; i < program_arg_types.size(); i++) {
+  //   if (program_arg_types[i].find("CallableKernel") != std::string::npos) {
+  //     // we have a kernel we can call, need to add it to
+  //     // append_kernel call.
+  //     qcor::append_kernel(program_parameters[i], {}, {});
+  //   }
+  // }
 
-  auto new_src = qcor::run_token_collector(PP, Toks, bufferNames);
+  std::string src_to_prepend;
+  auto new_src = qcor::run_token_collector(PP, Toks, src_to_prepend,
+                                           kernel_name, program_arg_types,
+                                           program_parameters, bufferNames);
+
+  if (!src_to_prepend.empty()) OS << src_to_prepend;
 
   // Rewrite the original function
   OS << "void " << kernel_name << "(" << program_arg_types[0] << " "
@@ -328,7 +346,7 @@ void QCORSyntaxHandler::GetReplacement(
   }
   OS << ");\n";
   OS << "}\n";
-   
+
   if (add_het_map_ctor) {
     // Remove "&" from type string before getting the Python variables in the
     // HetMap. Note: HetMap can't store references.
@@ -381,6 +399,25 @@ void QCORSyntaxHandler::GetReplacement(
         // We just pass this copied var to the ctor
         // where it expects a reference type.
         arg_ctor_list.emplace_back(new_var_name);
+      } else if (program_arg_types[i].rfind("KernelSignature", 0) == 0) {
+        // This is a KernelSignature argument.
+        // The one in HetMap is the function pointer represented as a hex string.
+        const std::string new_var_name =
+            "__temp_kernel_ptr_var__" + std::to_string(var_counter++);
+        // Retrieve the function pointer from the HetMap
+        // ref_type_copy_decl_ss << "std::cout << args.getString(\""
+        //                       << program_parameters[i] << "\").c_str() << std::endl;\n";
+        ref_type_copy_decl_ss << "void* " << new_var_name << " = "
+                              << "(void *) strtoull(args.getString(\""
+                              << program_parameters[i] << "\").c_str(), nullptr, 16);\n";
+        // ref_type_copy_decl_ss << "std::cout << " << new_var_name << " << std::endl;\n";
+        // Construct the KernelSignature
+        const std::string kernel_signature_var_name =
+            "__temp_kernel_signature_var__" + std::to_string(var_counter++);
+        ref_type_copy_decl_ss << program_arg_types[i] << " "
+                              << kernel_signature_var_name << "("
+                              << new_var_name << ");\n";
+        arg_ctor_list.emplace_back(kernel_signature_var_name);
       } else {
         // Otherwise, just unpack the arg inline in the ctor call.
         std::stringstream ss;

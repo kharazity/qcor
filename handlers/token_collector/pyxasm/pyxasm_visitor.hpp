@@ -33,9 +33,136 @@ class pyxasm_visitor : public pyxasmBaseVisitor {
   // New var declared (auto type) after visiting this node.
   std::string new_var;
   bool in_for_loop = false;
+  // Var to keep track of sub-node rewrite:
+  // e.g., traverse down the AST recursively.
+  std::stringstream sub_node_translation;
+  bool is_processing_sub_expr = false;
 
   antlrcpp::Any visitAtom_expr(
       pyxasmParser::Atom_exprContext *context) override {
+    // std::cout << "Atom_exprContext: " << context->getText() << "\n";
+    // Strategy:
+    // At the top level, we analyze the trailer to determine the 
+    // list of function call arguments.
+    // Then, traverse down the arg. node to see if there is a potential rewrite rules
+    // e.g. for arrays (as testlist_comp nodes)
+    // Otherwise, just get the argument text as is.
+    /*
+    atom_expr: (AWAIT)? atom trailer*;
+    atom: ('(' (yield_expr|testlist_comp)? ')' |
+       '[' (testlist_comp)? ']' |
+       '{' (dictorsetmaker)? '}' |
+       NAME | NUMBER | STRING+ | '...' | 'None' | 'True' | 'False');
+    */
+    // Only processes these for sub-expressesions, 
+    // e.g. re-entries to this function
+    if (is_processing_sub_expr) {
+      if (context->atom() && context->atom()->OPEN_BRACK() &&
+          context->atom()->CLOSE_BRACK() && context->atom()->testlist_comp()) {
+        // Array type expression:
+        // std::cout << "Array atom expression: "
+        //           << context->atom()->testlist_comp()->getText() << "\n";
+        // Use braces
+        sub_node_translation << "{";
+        bool firstElProcessed = false;
+        for (auto &testNode : context->atom()->testlist_comp()->test()) {
+          // std::cout << "Array elem: " << testNode->getText() << "\n";
+          // Add comma if needed (there is a previous element)
+          if (firstElProcessed) {
+            sub_node_translation << ", ";
+          }
+          sub_node_translation << testNode->getText();
+          firstElProcessed = true;
+        }
+        sub_node_translation << "}";
+        return 0;
+      }
+
+      // We don't have a re-write rule for this one (py::dict)
+      if (context->atom() && context->atom()->OPEN_BRACE() &&
+          context->atom()->CLOSE_BRACE() && context->atom()->dictorsetmaker()) {
+        // Dict:
+        // std::cout << "Dict atom expression: "
+        //           << context->atom()->dictorsetmaker()->getText() << "\n";
+        // TODO:
+        return 0;
+      }
+
+      if (context->atom() && !context->atom()->STRING().empty()) {
+        // Strings:
+        for (auto &strNode : context->atom()->STRING()) {
+          std::string cppStrLiteral = strNode->getText();
+          // Handle Python single-quotes
+          if (cppStrLiteral.front() == '\'' && cppStrLiteral.back() == '\'') {
+            cppStrLiteral.front() = '"';
+            cppStrLiteral.back() = '"';
+          }
+          sub_node_translation << cppStrLiteral;
+          // std::cout << "String expression: " << strNode->getText() << " --> "
+          //           << cppStrLiteral << "\n";
+        }
+        return 0;
+      }
+
+      const auto isSliceOp =
+          [](pyxasmParser::Atom_exprContext *atom_expr_context) -> bool {
+        if (atom_expr_context->trailer().size() == 1) {
+          auto subscriptlist = atom_expr_context->trailer(0)->subscriptlist();
+          if (subscriptlist && subscriptlist->subscript().size() == 1) {
+            auto subscript = subscriptlist->subscript(0);
+            const auto nbTestTerms = subscript->test().size();
+            // Multiple test terms (separated by ':')
+            return (nbTestTerms > 1);
+          }
+        }
+
+        return false;
+      };
+
+      // Handle slicing operations (multiple array subscriptions separated by
+      // ':') on a qreg.
+      if (context->atom() &&
+          xacc::container::contains(bufferNames, context->atom()->getText()) &&
+          isSliceOp(context)) {
+        // std::cout << "Slice op: " << context->getText() << "\n";
+        sub_node_translation << context->atom()->getText()
+                             << ".extract_range({";
+        auto subscripts =
+            context->trailer(0)->subscriptlist()->subscript(0)->test();
+        assert(subscripts.size() > 1);
+        std::vector<std::string> subscriptTerms;
+        for (auto &test : subscripts) {
+          subscriptTerms.emplace_back(test->getText());
+        }
+
+        auto sliceOp =
+            context->trailer(0)->subscriptlist()->subscript(0)->sliceop();
+        if (sliceOp && sliceOp->test()) {
+          subscriptTerms.emplace_back(sliceOp->test()->getText());
+        }
+        assert(subscriptTerms.size() == 2 || subscriptTerms.size() == 3);
+
+        for (int i = 0; i < subscriptTerms.size(); ++i) {
+          // Need to cast to prevent compiler errors,
+          // e.g. when using q.size() which returns an int.
+          sub_node_translation << "static_cast<size_t>(" << subscriptTerms[i]
+                               << ")";
+          if (i != subscriptTerms.size() - 1) {
+            sub_node_translation << ", ";
+          }
+        }
+
+        sub_node_translation << "})";
+
+        // convert the slice op to initializer list:
+        // std::cout << "Slice Convert: " << context->getText() << " --> "
+        //           << sub_node_translation.str() << "\n";
+        return 0;
+      }
+
+      return 0;
+    }
+
     // Handle kernel::ctrl(...), kernel::adjoint(...)
     if (!context->trailer().empty() &&
         (context->trailer()[0]->getText() == ".ctrl" ||
@@ -51,10 +178,18 @@ class pyxasm_visitor : public pyxasmBaseVisitor {
       std::stringstream ss;
       // Remove the first '.' character
       const std::string methodName = context->trailer()[0]->getText().substr(1);
-      ss << context->atom()->getText() << "::" << methodName
+      // If this is a *variable*, then using '.' for control/adjoint.
+      // Otherwise, use '::' (global scope kernel names)
+      const std::string separator =
+          (xacc::container::contains(declared_var_names,
+                                     context->atom()->getText()))
+              ? "."
+              : "::";
+
+      ss << context->atom()->getText() << separator << methodName
          << "(parent_kernel";
       for (int i = 0; i < arg_list->argument().size(); i++) {
-        ss << ", " << arg_list->argument(i)->getText();
+        ss << ", " << rewriteFunctionArgument(*(arg_list->argument(i)));
       }
       ss << ");\n";
 
@@ -97,7 +232,7 @@ class pyxasm_visitor : public pyxasmBaseVisitor {
             std::vector<std::string> buffer_names;
             for (int i = 0; i < required_bits; i++) {
               auto bit_expr = context->trailer()[0]->arglist()->argument()[i];
-              auto bit_expr_str = bit_expr->getText();
+              auto bit_expr_str = rewriteFunctionArgument(*bit_expr);
 
               auto found_bracket = bit_expr_str.find_first_of("[");
               if (found_bracket != std::string::npos) {
@@ -108,7 +243,9 @@ class pyxasm_visitor : public pyxasmBaseVisitor {
                 buffer_names.push_back(buffer_name);
                 inst->setBitExpression(i, bit_idx_expr);
               } else {
-                xacc::error("Must provide qreg[IDX] and not just qreg.");
+                // Indicate this is a qubit(-1) or a qreg(-2)
+                inst->setBitExpression(-1, bit_expr_str);
+                buffer_names.push_back(bit_expr_str);
               }
             }
             inst->setBufferNames(buffer_names);
@@ -154,11 +291,14 @@ class pyxasm_visitor : public pyxasmBaseVisitor {
           // Note: these circuits (except exp_i_theta) don't have QRT
           // equivalents.
           // Condition: first argument is a qubit register
-          else if (!context->trailer()[0]->arglist()->argument().empty() &&
-                   xacc::container::contains(bufferNames, context->trailer()[0]
-                                                              ->arglist()
-                                                              ->argument(0)
-                                                              ->getText())) {
+          else if (xacc::container::contains(
+                       ::quantum::kernels_in_translation_unit, inst_name) ||
+                   !context->trailer()[0]->arglist()->argument().empty() &&
+                       xacc::container::contains(bufferNames,
+                                                 context->trailer()[0]
+                                                     ->arglist()
+                                                     ->argument(0)
+                                                     ->getText())) {
             std::stringstream ss;
             // Use the kernel call with a parent kernel arg.
             ss << inst_name << "(parent_kernel, ";
@@ -205,8 +345,24 @@ class pyxasm_visitor : public pyxasmBaseVisitor {
             // A classical call-like expression: i.e. not a kernel call:
             // Just output it *as-is* to the C++ stream.
             // We can hook more sophisticated code-gen here if required.
+            // std::cout << "Callable: " << context->getText() << "\n";
             std::stringstream ss;
-            ss << context->getText() << ";\n";
+
+            if (context->trailer()[0]->arglist() &&
+                !context->trailer()[0]->arglist()->argument().empty()) {
+              const auto &argList =
+                  context->trailer()[0]->arglist()->argument();
+              ss << inst_name << "(";
+              for (size_t i = 0; i < argList.size(); ++i) {                
+                ss << rewriteFunctionArgument(*(argList[i]));                
+                if (i != argList.size() - 1) {
+                  ss << ", ";
+                }
+              }
+              ss << ");\n";
+            } else {
+              ss << context->getText() << ";\n";
+            }
             result.first = ss.str();
           }
         }
@@ -234,8 +390,7 @@ class pyxasm_visitor : public pyxasmBaseVisitor {
     }
 
     std::stringstream ss;
-    ss << "for (auto " << counter_expr << " : " << iter_container
-       << ") {\n";
+    ss << "for (auto " << counter_expr << " : " << iter_container << ") {\n";
     result.first = ss.str();
     in_for_loop = true;
     return 0;
@@ -246,7 +401,7 @@ class pyxasm_visitor : public pyxasmBaseVisitor {
       // Handle simple assignment: a = expr
       std::stringstream ss;
       const std::string lhs = ctx->testlist_star_expr(0)->getText();
-      const std::string rhs = replacePythonConstants(
+      std::string rhs = replacePythonConstants(
           replaceMeasureAssignment(ctx->testlist_star_expr(1)->getText()));
 
       if (lhs.find(",") != std::string::npos) {
@@ -265,6 +420,22 @@ class pyxasm_visitor : public pyxasmBaseVisitor {
           }
         }
       } else {
+        // Strategy: try to traverse the rhs to see if there is a possible rewrite;
+        // Otherwise, use the text as is.
+        is_processing_sub_expr = true;
+        // clear the sub_node_translation  
+        sub_node_translation.str(std::string());
+
+        // visit arg sub-node:
+        visitChildren(ctx->testlist_star_expr(1));
+
+        // Check if there is a rewrite:
+        if (!sub_node_translation.str().empty()) {
+          // Update RHS
+          rhs = replacePythonConstants(
+              replaceMeasureAssignment(sub_node_translation.str()));
+        }
+
         if (xacc::container::contains(declared_var_names, lhs)) {
           ss << lhs << " = " << rhs << "; \n";
         } else {
@@ -370,5 +541,35 @@ class pyxasm_visitor : public pyxasmBaseVisitor {
     } else {
       return in_expr;
     }
+  }
+
+  // A helper to rewrite function argument by traversing the node to see
+  // if there is a potential rewrite.
+  // Use case: inline expressions
+  // e.g. X(q[0:3])
+  // slicing of the qreg 'q' then call the broadcast X op.
+  // i.e., we need to rewrite the arg to q.extract_range({0, 3}).
+  std::string
+  rewriteFunctionArgument(pyxasmParser::ArgumentContext &in_argContext) {
+    // Strategy: try to traverse the argument context to see if there is a
+    // possible rewrite; i.e. it may be another atom_expression that we have a
+    // handler for. Otherwise, use the text as is.
+    // We need this flag to prevent parsing quantum instructions as sub-expressions.
+    // e.g. QCOR operators (X, Y, Z) in an observable definition shouldn't be 
+    // processed as instructions.
+    is_processing_sub_expr = true;
+    // clear the sub_node_translation
+    sub_node_translation.str(std::string());
+
+    // visit arg sub-node:
+    visitChildren(&in_argContext);
+
+    // Check if there is a rewrite:
+    if (!sub_node_translation.str().empty()) {
+      // Update RHS
+      return sub_node_translation.str();
+    }
+    // Returns the string as is
+    return in_argContext.getText();
   }
 };

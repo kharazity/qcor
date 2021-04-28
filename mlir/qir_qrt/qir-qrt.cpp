@@ -400,9 +400,14 @@ void __quantum__rt__finalize() {
     xacc::internal_compiler::execute_pass_manager();
     ::quantum::submit(global_qreg.get());
     auto counts = global_qreg->getMeasurementCounts();
-    std::cout << "Observed Counts:\n";
-    for (auto [bits, count] : counts) {
-      std::cout << bits << " : " << count << "\n";
+    if (!counts.empty()) {
+      std::cout << "Observed Counts:\n";
+      for (auto [bits, count] : counts) {
+        std::cout << bits << " : " << count << "\n";
+      }
+    } else {
+      std::cout << "Result Buffer:\n";
+      global_qreg->print();
     }
   } else if (external_qreg_provided) {
     xacc::internal_compiler::execute_pass_manager();
@@ -429,12 +434,15 @@ bool __quantum__rt__result_equal(Result *res, Result *comp) {
 Result *__quantum__rt__result_get_one() { return ResultOne; }
 Result *__quantum__rt__result_get_zero() { return ResultZero; }
 
-void __quantum__rt__string_update_reference_count(void *str, int64_t count) {
+void __quantum__rt__result_update_reference_count(Result *, int32_t count) {
   // TODO
   if (verbose) std::cout << "CALL: " << __PRETTY_FUNCTION__ << "\n";
 }
 
-void __quantum__rt__result_update_reference_count(Result *, int64_t count) {
-  // TODO
-  if (verbose) std::cout << "CALL: " << __PRETTY_FUNCTION__ << "\n";
+void __quantum__rt__fail(QirString *str) {
+  throw std::runtime_error(str->m_str);
+}
+
+void __quantum__rt__message(QirString *str) {
+  std::cout << "[QIR Message] " << str->m_str << "\n";
 }
